@@ -1,0 +1,377 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.2cm,top=2.4cm,bottom=2.4cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{array,booktabs,tabularx,longtable}
+\usepackage{xcolor}
+\usepackage{framed}
+\usepackage[hidelinks]{hyperref}
+\urlstyle{tt}
+
+\definecolor{accent}{HTML}{0F6E74}
+\definecolor{shadecolor}{HTML}{EEF5F5}
+\definecolor{medsev}{HTML}{B4561E}
+\definecolor{lowsev}{HTML}{5B6B7A}
+\definecolor{okcol}{HTML}{2E7D32}
+\definecolor{partcol}{HTML}{9A6B00}
+\definecolor{misscol}{HTML}{B4561E}
+
+\newcommand{\sev}[2]{\colorbox{#1}{\textcolor{white}{\small\bfseries\sffamily #2}}}
+\newcommand{\Med}{\sev{medsev}{MEDIUM}}
+\newcommand{\Low}{\sev{lowsev}{LOW}}
+\newcommand{\Ok}{\textcolor{okcol}{\sffamily\bfseries covered}}
+\newcommand{\Part}{\textcolor{partcol}{\sffamily\bfseries partial}}
+\newcommand{\Miss}{\textcolor{misscol}{\sffamily\bfseries missing}}
+\newcommand{\eqr}[1]{(#1)}
+\newcommand{\dt}{\partial_t}
+\newcommand{\dr}{\partial_r}
+\newcommand{\fd}{\partial_t f}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+% Start a new page unless #1 lines of space remain (needspace equivalent).
+\makeatletter
+\newcommand{\needlines}[1]{\par\penalty-100\begingroup
+  \setlength{\dimen@}{#1\baselineskip}\dimen@ii\pagegoal\advance\dimen@ii-\pagetotal
+  \ifdim\dimen@>\dimen@ii\ifdim\dimen@ii>\z@\vfil\fi\penalty-\@M\fi\endgroup}
+\makeatother
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.55em}
+\renewcommand{\arraystretch}{1.25}
+\setcounter{secnumdepth}{2}
+
+\pagestyle{myheadings}
+\markright{\small\textsc{Consistency review: MMIEF implementation report vs.\ repository}}
+
+% Item block for an inconsistency.
+\newenvironment{finding}[3]{%
+  \par\medskip
+  \noindent{\large\bfseries\color{accent} #1\quad #2}\hfill #3\par\nopagebreak\smallskip
+  \noindent\tabularx{\textwidth}{@{}>{\bfseries}p{2.35cm}Y@{}}}
+  {\endtabularx\par\medskip}
+
+\begin{document}
+
+\begin{center}
+{\color{accent}\rule{\textwidth}{1.2pt}}\\[0.9em]
+{\LARGE\bfseries Consistency Review of the MMIEF\\[0.25em] Implementation Report}\\[0.7em]
+{\large\color{accent} Report \emph{``Spherical Einstein--Klein--Gordon Numerical Implementation''}\\
+(21 November 2026, 15 pp.) checked against the Julia repository}\\[0.8em]
+{\color{accent}\rule{\textwidth}{1.2pt}}
+\end{center}
+
+\begin{shaded}
+\textbf{Reviewed document.} The 15-page implementation report dated 21 November 2026
+(sections and equation numbers below refer to it).\\
+\textbf{Repository state.} \texttt{DancingAnYoN/tails\_three\_plus\_one}, branch \texttt{main},
+commit \texttt{9c22e00}, plus the uncommitted local working tree. The local tree adds a
+\texttt{QNMRefined} module and scripts that are not yet on GitHub and that the report does not cover.\\
+\textbf{Method.} Static reading of \texttt{src/}, \texttt{scripts/}, \texttt{test/}, \texttt{viz/} and the
+technical notes, plus independent hand re-derivation of the equations.
+\textbf{No Julia code was executed} for this review: no tests, simulations, convergence or
+boundary runs. Statements about run-time behaviour are inferred from the source.\\
+\textbf{Date.} 21 November 2026.
+\end{shaded}
+
+\section{Summary}
+
+\begin{itemize}
+\item \textbf{Continuum physics is consistent.} Every equation in the report that has a
+  counterpart in the code agrees with the implementation term by term (with $G=1$,
+  $\kappa_4=8\pi$). Equations stated without derivation, namely (22), (23)--(24),
+  (36)--(39), (59) and (62), were re-derived and are correct.
+\item \textbf{Nine inconsistencies} concern the description of the numerics, the module layout,
+  the fit model and one command (Section~\ref{sec:findings}). Three are rated
+  \Med{} (a reader following the report would get a wrong picture of the code or a
+  failing command); six are rated \Low{} (imprecise or incomplete, no effect on results).
+\item \textbf{Several checklist items read as implemented but are not} (Section~\ref{sec:notimpl}),
+  chiefly the independent residuals in \S\S5.4 and 8.1 and most of the validation ladder V3--V7
+  (Section~\ref{sec:ladder}).
+\item \textbf{One open item of the report can be settled analytically.} The local
+  characteristics at the horizon (\S7.2) are $c_{\rm in}=-1$ and $c_{\rm out}=-\fd\le 0$, so no
+  scalar characteristic enters the domain (Appendix~\ref{app:char}). Appendix~\ref{app:lock}
+  gives a derivation of the horizon-locking law (39), which the report states without proof.
+\item \textbf{Outside the report's scope:} the QNM window script shifts windows between observers
+  with the Schwarzschild tortoise delay (coefficient $2M$) rather than the MMIEF delay
+  (coefficient $4M$) (Section~\ref{sec:extra}).
+\end{itemize}
+
+\section{Items verified as consistent}
+
+\small
+\begin{longtable}{@{}L{1.55cm}L{3.6cm}L{4.2cm}L{5.95cm}@{}}
+\toprule
+\textbf{Report} & \textbf{Content} & \textbf{Repository} & \textbf{How checked}\\
+\midrule
+\endhead
+(5)--(12) & Metric, normal, inverse metric, $\sqrt{-g}$, kinematic equations for $a$, $J$ & foundational; used throughout &
+  Re-derived (10)--(12) from $\dt\gamma_{ij}=-2\alpha K_{ij}+D_i\beta_j+D_j\beta_i$ with $\beta_r=a^2\beta$.\\
+(13)--(15) & Spatial Ricci components & enter via (30)--(31) & Standard results for $a^2dr^2+J^2d\Omega^2$; ${}^{(3)}\!R={}^{(3)}\!R^r{}_r+2\,{}^{(3)}\!R^\theta{}_\theta$ checked.\\
+(16)--(22) & First-order Klein--Gordon system & \path{src/ScalarField.jl:27-34}; fluxes in \path{src/Evolution.jl:86-92} &
+  (21)$\Leftrightarrow$(18) using $\dt J$; (22)$\Leftrightarrow$(21) using (12).\\
+(23)--(24) & $\rho$, $j_r$, $S^r{}_r$, $S^\theta{}_\theta$; trace-reversed source & implicit in constraints &
+  Recomputed from $T_{\mu\nu}$; $S^\theta{}_\theta-\tfrac12(S-\rho)=0$ and $S^r{}_r-\tfrac12(S-\rho)=\Phi^2/a^2$.\\
+(25)--(28) & Hamiltonian and momentum constraints & \path{src/Constraints.jl:5-15} &
+  $K^2-K_{ij}K^{ij}=4AB+2B^2$; momentum from $D_jK^j{}_r-\dr K=8\pi j_r$.\\
+(29)--(31) & Mixed-index curvature evolution & (31) via (45) in \path{src/EinsteinEquations.jl:8-10} &
+  (45) follows from (31) with $\alpha=a(1-\beta)$, $\dr J=1$; the $\dr a$ terms cancel.\\
+(32)--(35) & MMIEF gauge, null speeds & \path{src/Geometry.jl:20-28}, \path{src/Evolution.jl:81-83} & Identical.\\
+(36)--(38) & Misner--Sharp mass, expansions, horizon & \path{src/Geometry.jl:29-30}, \path{src/Constraints.jl:33-66} &
+  $g^{\mu\nu}\partial_\mu J\partial_\nu J=(\dr J)^2/a^2-J^2B^2$; $\theta_\pm$ re-derived; $m_h=J_h/2$ imposed.\\
+(39) & Horizon-locking law & \path{src/Geometry.jl:32-35} & Derived independently (Appendix~\ref{app:lock}).\\
+(40)--(43) & Reduced constraints, radial mass ODE & \path{src/Constraints.jl:5-25} & $\dr m$ from (36) with (40), (41) gives (43) exactly.\\
+(44)--(48) & MMIEF evolution system & \path{src/EinsteinEquations.jl:8-10}, \path{src/ScalarField.jl:29-31} & Identical term by term.\\
+(49) & Uniform grid & \path{src/Grid.jl:26-30} & $\Delta r$ is the input; \texttt{check\_config} requires $(r_{\max}-r_h)/\Delta r\in\mathbb{N}$.\\
+(50) & Centred 4th-order stencil & \path{src/FiniteDifferences.jl:11-13} & Identical.\\
+(58)--(61) & Pulse, ingoing $\Pi$, Schwarzschild data & \path{src/ScalarField.jl:5-22}, \path{src/InitialData.jl}, \path{src/Geometry.jl:6-13} &
+  $1/(1-\beta_0)=1+aJB$ at $\fd=0$; $B_h=1/(2\sqrt2M_0)$; $\alpha_S=\sqrt{r/(r+2M)}$.\\
+(62) & Outer scalar condition & \path{src/BoundaryConditions.jl:8-20} & Derived from a Sommerfeld condition on $J\varphi$ (Appendix~\ref{app:char}).\\
+(63), \S8.2 & Fixed-$J$ observers, no clamping & \path{src/Observers.jl:12-48} & Out-of-domain sampling throws an error; cubic Lagrange interpolation.\\
+(64), \S8.3 & QNM value, 56.9\,$M_f$, 9.53\,$M_f$ & \path{scripts/check_qnm_vs_theory.jl} & $2\pi/0.110455=56.9$; $1/0.104896=9.53$; fits use $T=t-f$.\\
+(66) & Local power index & \path{src/Analysis.jl:53-96} & Same definition; the code uses a running-peak envelope instead of masking zeros.\\
+(68)--(69) & $D$-dimensional roadmap & not implemented & $D=6$: $8\pi/12=2\pi/3$; agrees with the project's $D$-dimensional notes.\\
+\S10.2 & Commands, output files & \path{scripts/run_constrained.jl}, \path{scripts/run_simulation.jl}, \path{src/DataOutput.jl:83-143} &
+  Flags, \texttt{results/constrained\_<mode>} names and the six output files exist; \texttt{final\_state.csv} has no $t$ or $f$ column, consistent with ``not a restart checkpoint''.\\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\section{Inconsistencies}\label{sec:findings}
+
+Severity: \Med{} = a reader following the report would get a wrong picture of the code or a
+failing command; \Low{} = imprecise or incomplete description, no effect on results.
+
+\begin{finding}{I1}{Scope of the well-balancing correction (\S6.6)}{\Med}
+Report & ``The package also subtracts a discrete stationary-Schwarzschild RHS residual from the
+$B$ equation.''\\
+Repository & Constraint-solved path: $B$ only (\path{src/ConstraintSolvedEvolution.jl:146-150}).
+Baseline path: \emph{both} $a$ and $B$ (\path{src/Evolution.jl:97-101}). Neither the \S6.1
+comparison table nor V2 distinguishes the two.\\
+Correction & ``\dots from the $B$ equation in the constraint-solved path, and from both the
+$a$ and $B$ equations in the baseline path.'' Add a ``Well-balancing'' row to the \S6.1 table.\\
+\end{finding}
+
+\begin{finding}{I2}{Ringdown model has an offset the code does not fit (eq.\ 65)}{\Med}
+Report & $\varphi(T,J_{\rm obs})\approx C+A_0e^{-\Gamma(T-T_0)}\cos[\omega_R(T-T_0)+\delta]$.\\
+Repository & \texttt{Analysis.fit\_qnm} (\path{src/Analysis.jl:6-51}) and the local \texttt{QNMRefined}
+module both fit $e^{-\gamma\tau}(c_1\cos\omega\tau+c_2\sin\omega\tau)$ with $\tau$ measured from
+the window start and \emph{no constant offset}. Both use $T=t-f$, as the report requires.\\
+Correction & Drop the offset or state that the implemented fit has none, e.g.\
+$\varphi\approx e^{-\Gamma(T-T_0)}[c_1\cos\omega_R(T-T_0)+c_2\sin\omega_R(T-T_0)]$.
+Avoid the symbols $C$ (reserved for the Courant number by the project conventions) and $A_0$
+(clashes with $A=K^r{}_r$ and with the initial-data ansatz $A_0$ in \texttt{EQUATIONS.md}).\\
+\end{finding}
+
+\begin{finding}{I3}{Render command fails in PowerShell (\S10.2)}{\Med}
+Report & Under ``From the repository root on Windows PowerShell'':
+\texttt{julia -{}-project=viz scripts/render\_constrained.jl \textbackslash} followed by
+\texttt{results/constrained\_standard -{}-movie} on a new line.\\
+Problem & A backslash is not a line continuation in PowerShell, so the second line runs as a
+separate command and the renderer receives no run directory.\\
+Correction & Write it on one line:\newline
+\mbox{\scriptsize\texttt{julia -{}-project=viz scripts/render\_constrained.jl results/constrained\_standard -{}-movie}}\newline
+(the run directory must exist, i.e.\ \texttt{run\_constrained.jl -{}-standard} must have finished).\\
+\end{finding}
+
+\begin{finding}{I4}{Module responsibilities (\S10.1)}{\Low}
+Report & \texttt{BoundaryConditions.jl}: ``Inner one-sided treatment and outgoing outer
+projection''. \texttt{ScalarField.jl}: ``Fluxes''.\\
+Repository & \texttt{BoundaryConditions.jl} contains only the outer projection and outer RHS.
+The inner one-sided stencils live in \texttt{FiniteDifferences.deriv4!} (rows $1,2$ and $n-1,n$);
+by design there is no explicit inner boundary condition. \texttt{ScalarField.jl} applies
+precomputed flux derivatives; the fluxes are assembled in \texttt{Evolution.rhs!} and
+\texttt{ConstraintSolvedEvolution.constrained\_rhs!}.\\
+Correction & Move ``one-sided boundary stencils'' to the \texttt{FiniteDifferences.jl} row;
+describe \texttt{BoundaryConditions.jl} as ``outer scalar projection and outer RHS''.\\
+\end{finding}
+
+\begin{finding}{I5}{Where the constraint projection happens (\S\S6.4--6.5)}{\Low}
+Report & Each evaluation of $F_h$ ``contains the geometrical reconstruction''; (52)--(56) are
+plain RK4; the stage recipe starts with the outer projection, then the mass integration.\\
+Repository & The projection $P$ is a separate \texttt{project!} callback applied to stages
+2--4 \emph{and to the accepted state} (\path{src/Integrators.jl:31-55}; \path{test/unit/test_rk4.jl}
+checks the four calls). Stage 1 uses the state projected at the end of the previous step.
+In the constraint-solved path $P$ repeats \{radial mass solve; outer scalar projection\}
+until the outer $a$ and $\Pi$ change by less than $2\times10^{-12}$ (at most 12 passes),
+does a final mass solve, and then requires $|aJB-1|_h<10^{-10}$
+(\path{src/ConstraintSolvedEvolution.jl:63-91}). $\alpha$ is never formed; $\alpha/a=1-\beta$
+is substituted directly.\\
+Correction & Write the scheme as
+$U^{(s)}=P\bigl(U_n+c_s\Delta t\,k_{s-1}\bigr)$, $k_s=F_h(U^{(s)})$,
+$U_{n+1}=P\bigl(U_n+\tfrac{\Delta t}{6}(k_1+2k_2+2k_3+k_4)\bigr)$; reorder steps 1--3 to the
+code's order; note that keeping $P$ outside $F_h$ is a deliberate design rule
+(\texttt{AGENTS.md}, \texttt{ARCHITECTURE.md}).\\
+\end{finding}
+
+\begin{finding}{I6}{Order of the radial mass integrator near the edges (\S6.3)}{\Low}
+Report & ``radial RK4 integration with fourth-order midpoint interpolation''.\\
+Repository & Four-point (cubic) midpoint interpolation is used on interior intervals only.
+The first and last intervals use the two-point average, which is second order
+(\path{src/Constraints.jl:45-54}).\\
+Correction & State the edge treatment. The effect is expected to be small, but it matters for
+V1 and V6 if convergence degrades near $r_h$ or $r_{\max}$.\\
+\end{finding}
+
+\begin{finding}{I7}{CFL speeds left unspecified (\S6.6)}{\Low}
+Report & $c_{\rm other}$ ``denotes other relevant numerical/constraint characteristic estimates''.\\
+Repository & Constraint-solved: $v_{\max}=\max_i\{1,|1-2\beta|,|\beta|\}$
+(\path{src/ConstraintSolvedEvolution.jl:225-233}). Baseline: $\max_i\{1,|1-2\beta|\}$
+(\path{src/Evolution.jl:158-164}). In both, $\Delta t=\min(C\Delta r/v_{\max},\,t_{\max}-t)$;
+the configuration enforces $0<C\le0.5$; the scripts use $C=0.15$ (constrained) and $0.20$ (baseline).\\
+Correction & State these speeds and Courant numbers explicitly.\\
+\end{finding}
+
+\begin{finding}{I8}{Validation status in the \S6.1 table}{\Low}
+Report & Baseline: ``Existing prototype''; constraint-solved: ``Newer research prototype; not
+yet convergence-validated''.\\
+Repository & \texttt{VALIDATION.md} and \texttt{AGENTS.md}: \emph{neither} path is
+convergence-validated. The table suggests an asymmetry that does not exist.\\
+Correction & Mark both paths ``not convergence-validated''.\\
+\end{finding}
+
+\begin{finding}{I9}{Units of the observer radii (\S8.2)}{\Low}
+Report & ``Interpolate $\varphi(t,r)$ to $J_{\rm obs}/M_0\in\{10,30,50\}$.''\\
+Repository & \texttt{Config.observers} stores absolute areal radii $[10,30,50]$
+(\path{src/Types.jl:18}). These equal $J_{\rm obs}/M_0$ only for the default $M_0=1$.\\
+Correction & ``$J_{\rm obs}\in\{10,30,50\}$ (in units with $M_0=1$)''.\\
+\end{finding}
+
+\section{Prescribed in the report but not (yet) implemented}\label{sec:notimpl}
+
+The report describes itself as an audit checklist, but the wording ``record \dots'' in \S8.1
+and \S5.4 can be read as describing existing code. Current status:
+
+\small
+\begin{longtable}{@{}L{5.2cm}L{1.9cm}L{8.6cm}@{}}
+\toprule
+\textbf{Item} & \textbf{Report} & \textbf{Repository status}\\
+\midrule
+\endhead
+Independent $\dt A$ residual & \S5.4 & Not computed.\\
+Independent $\dt a$ residual along a constrained solution & \S8.1, V5 & Not computed (\texttt{CONSTRAINED\_FORMULATION.md} \S1 says it ``can be evaluated'').\\
+Momentum residual with an alternative derivative & \S8.1 & Not computed; \path{src/Diagnostics.jl:23} notes the residual is identically zero by construction.\\
+$L^\infty$ constraint norms & \S8.1 & Only RMS norms, $\sqrt{\langle H^2\rangle}$ over interior points $2\ldots n-2$, labelled ``L2''.\\
+Mass deposition vs.\ escaping flux budget & \S8.1 & Only a fail-fast check $M_h\le M_{\rm out}(0)+\epsilon$, with $\epsilon=\max\{0.01M_0,\,0.1[M_{\rm out}(0)-M_0]\}$.\\
+Horizon expansion $\theta_+$ & \S8.1 & Not recorded; $aJB-1$ at $r_h$ is recorded (before and after projection), which is equivalent there.\\
+Positivity of $a^{-2}$, $\alpha>0$ & \S8.1 & Enforced by run-time errors, not recorded as diagnostics.\\
+Diagnostics ``at accepted time steps'' & \S6.5, \S8.1 & Recorded every \texttt{output\_dt} (default $0.5M_0$); observer-domain checks run every step.\\
+Branch $B_h>0$ & \S5.2 & Checked in the constraint-solved path only (\path{src/ConstraintSolvedEvolution.jl:66}); the baseline projection takes $a_h=1/(J_h|B_h|)$ without a sign check.\\
+Code revision in output metadata & \S10.2 & \texttt{metadata.toml} stores \texttt{"MMIEF v0.1.0"}; no git commit is recorded.\\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\needlines{10}
+\section{Validation ladder coverage}\label{sec:ladder}
+
+\small
+\begin{longtable}{@{}L{1.0cm}L{1.6cm}L{13.1cm}@{}}
+\toprule
+\textbf{Step} & \textbf{Status} & \textbf{What exists in \texttt{test/} and \texttt{scripts/}}\\
+\midrule
+\endhead
+V1 & \Part & Interior stencil convergence (error ratio 12--20) and RK4 convergence are tested; one-sided stencils only for exactness on a quadratic (no order test); cubic interpolation exact on a cubic; the radial mass integration is only compared with the initial data ($<10^{-3}$), with no convergence test; KO only checked to annihilate constants.\\
+V2 & \Part & Schwarzschild $a,\beta,\alpha,m$ identities tested; vacuum RHS $<10^{-10}$ (baseline) and $<10^{-11}$ (constrained), but only with well-balancing switched on. No test of the unbalanced residual, although both RHS functions accept a switch (\texttt{subtract\_background}, \texttt{well\_balance}).\\
+V3 & \Miss & Only a periodic one-dimensional first-order wave test of the method-of-lines driver; no spherical flat-space test.\\
+V4 & \Miss & No fixed-background Regge--Wheeler solver.\\
+V5 & \Part & Hamiltonian RMS, $\Phi-\dr\varphi$ and horizon residuals recorded; no independent $\dt a$ residual and no mass--flux budget.\\
+V6 & \Miss & No convergence script or test.\\
+V7 & \Miss & A \texttt{-{}-long} mode ($r_{\max}=1700$) exists, but there is no automated comparison between domain sizes.\\
+V8 & \Part & \texttt{check\_qnm\_vs\_theory.jl} scans five windows at three observers for one run; no spread across resolutions. See also Section~\ref{sec:extra}.\\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\section{Additional observation outside the report's scope}\label{sec:extra}
+
+\path{scripts/check_qnm_vs_theory.jl} (lines 21--24, 51, 57) shifts the fit windows between
+observers by the Schwarzschild tortoise difference, using $J+2M\ln(J/2M-1)$. In stationary
+MMIEF coordinates (which coincide with ingoing Eddington--Finkelstein coordinates in vacuum) an
+outgoing radial null ray satisfies
+\[
+  \frac{dr}{dt}=1-2\beta=\frac{r-2M}{r+2M}
+  \quad\Longrightarrow\quad
+  \Delta T=\Delta r+4M\ln\frac{r_2-2M}{r_1-2M},
+\]
+which is the delay stated in \texttt{AGENTS.md}. Equivalently, the retarded time is
+\[
+  u=T-r-4M\ln\left(\frac{r}{2M}-1\right).
+\]
+The script therefore under-shifts by $2M\ln[(J-2M)/(J_{\rm ref}-2M)]$:
+about $2.5M$ between $J=10$ and $J_{\rm ref}=30$, and $1.1M$ between $J=50$ and $J_{\rm ref}=30$
+(for $M_f\approx1$). Compared with the e-folding time $9.53M_f$, this visibly changes which part
+of the ringdown each window contains. Suggested action: use the $4M$ delay in the script, and
+state it in \S8.3 of the report.
+
+\appendix
+\section{Derivation of the horizon-locking law (39)}\label{app:lock}
+
+Let $Q=aJB$. At the tracked horizon $Q=1$, so $B=1/(aJ)$, and from (33)
+\[
+  \beta_h=\tfrac12(1+\fd),\qquad
+  \dr\beta=\frac{(1-\fd)\,\dr Q}{(1+Q)^2}=\tfrac14(1-\fd)\,\dr Q,\qquad
+  \dr Q=X+\frac1J+Y,
+\]
+with $X\equiv\dr a/a$ and $Y\equiv aJ\dr B$. Using $\dt J=\fd$, (44) and (45):
+\[
+  \dt Q=JB\,\dt a+aB\,\fd+aJ\,\dt B
+  =\beta(X+Y)+2\dr\beta+\frac{(1-\beta)(a^2+1)}{J}+\frac{\fd}{J}
+\]
+at $Q=1$. The $A$ terms cancel identically. Inserting $\beta_h$ and $\dr\beta$:
+\[
+  \dt Q\big|_h=X+Y+\frac{(1-\fd)(a^2+2)}{2J}+\frac{\fd}{J}.
+\]
+The constraints (40) and (41) at $Q=1$ give
+\[
+  X=-\frac{a^2}{2J}-aA+2\pi J(\Phi^2+\Pi^2),\qquad
+  Y=aA-\frac1J+4\pi J\Phi\Pi,\qquad
+  X+Y=-\frac{a^2+2}{2J}+2\pi J(\Phi+\Pi)^2 .
+\]
+Hence
+\[
+  \boxed{\;\dt Q\big|_{r_h}=\frac{a^2}{2J}\left[\frac{4\pi J^2}{a^2}(\Phi+\Pi)^2-\fd\right]_{r_h}\;}
+\]
+and $\dt Q|_{r_h}=0$ is equivalent to (39). Two remarks:
+\begin{itemize}
+\item The result does not depend on $A$, so it holds whether $A$ is evolved or reconstructed from (42).
+\item $\fd\ge0$, so $J_h=r_h+f$ never decreases, as required by the area theorem for a scalar field
+  obeying the null energy condition. The boxed identity also shows that a mismatch in $\fd$ drives
+  $aJB-1$ at the horizon at the rate $(a^2/2J)(\fd_{\rm lock}-\fd)$, which is what the recorded
+  pre-projection horizon error measures.
+\end{itemize}
+
+\section{Scalar characteristics at the boundaries}\label{app:char}
+
+With the gauge (32), the principal part of (47)--(48) is
+$\dt\Phi=\dr[\beta\Phi+(1-\beta)\Pi]$, $\dt\Pi=\dr[\beta\Pi+(1-\beta)\Phi]$. The characteristic
+variables and speeds are
+\[
+  w_-=\Pi+\Phi:\; c_{\rm in}=-1,\qquad
+  w_+=\Pi-\Phi:\; c_{\rm out}=1-2\beta.
+\]
+
+\textbf{Outer boundary.} At $r_{\max}$ the incoming variable is $w_-=\Pi+\Phi$; it is the one
+that must be prescribed, and (62) does so. Imposing the outgoing Sommerfeld condition
+$(\dt+c_{\rm out}\dr)(J\varphi)=0$ with $\dr J=1$, $\dt J=\fd$ and (46) gives
+\[
+  J\bigl[\beta\Phi+(1-\beta)\Pi\bigr]+\fd\,\varphi+(1-2\beta)(\varphi+J\Phi)=0
+  \;\Longleftrightarrow\;
+  (1-\beta)(\Pi+\Phi)+\frac{1-2\beta+\fd}{J}\,\varphi=0,
+\]
+which is exactly (62) and \path{src/BoundaryConditions.jl:18}. Its error at finite radius
+comes from back-scattering off the curvature potential, not from the algebra.
+
+\textbf{Inner boundary.} At $r_h$, $Q=1$ gives $\beta_h=\tfrac12(1+\fd)$, hence
+\[
+  c_{\rm in}=-1,\qquad c_{\rm out}=1-2\beta_h=-\fd\le0 .
+\]
+No scalar characteristic enters the domain through $r_h$, so no inner scalar boundary condition
+is needed. During accretion ($\fd>0$) both characteristics leave the domain. In vacuum, or
+whenever $\Pi+\Phi=0$ at the horizon, the outgoing characteristic is \emph{tangent} to the
+boundary ($c_{\rm out}=0$). That marginal case is where the one-sided stencils deserve a
+dedicated test. The characteristic speed of the gravitational $B$ equation depends on whether
+$a$ is evolved or reconstructed from the mass constraint and was not analysed here.
+
+\end{document}

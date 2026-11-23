@@ -1,3 +1,8 @@
+# Baseline ("partially constrained") MMIEF solver: a and B are evolved with
+# their Einstein equations, A is rebuilt from the momentum constraint at each
+# RHS call, a is re-projected onto the Hamiltonian constraint at every RK4
+# stage, and f follows the horizon-locking law. See ConstraintSolvedEvolution
+# for the alternative in which a is never evolved.
 module Evolution
 using Printf
 using ..Types: Config, IA, IB, IPHI, IPI, IFIELD
@@ -16,23 +21,25 @@ using ..Diagnostics: diagnostics
 using ..DataOutput: RunData, store_sample!, store_frame!
 export run_evolution, vacuum_test, rhs!, Workspace, setup_vacuum_balance!,
        evolve_one_step!, EvolutionWorkspace
+# Preallocated arrays for one RHS evaluation (no allocations in the hot loop).
+# A "d" prefix means ∂_r of the named quantity.
 mutable struct Workspace
-    r::Vector{Float64}
-    J::Vector{Float64}
-    A::Vector{Float64}
-    beta::Vector{Float64}
-    dAmetric::Vector{Float64}
-    dB::Vector{Float64}
-    dPhi::Vector{Float64}
-    dBeta::Vector{Float64}
-    dABeta::Vector{Float64}
-    dFFlux::Vector{Float64}
-    dPFlux::Vector{Float64}
-    aBeta::Vector{Float64}
-    fFlux::Vector{Float64}
-    pFlux::Vector{Float64}
-    vacuum_a_rhs::Vector{Float64}
-    vacuum_B_rhs::Vector{Float64}
+    r::Vector{Float64}          # grid coordinates
+    J::Vector{Float64}          # areal radius r + f at this stage
+    A::Vector{Float64}          # K^r_r from the momentum constraint
+    beta::Vector{Float64}       # shift β = (ḟ + aJB)/(1 + aJB)
+    dAmetric::Vector{Float64}   # ∂_r a
+    dB::Vector{Float64}         # ∂_r B
+    dPhi::Vector{Float64}       # ∂_r Φ
+    dBeta::Vector{Float64}      # ∂_r β
+    dABeta::Vector{Float64}     # ∂_r(aβ)
+    dFFlux::Vector{Float64}     # ∂_r of fFlux
+    dPFlux::Vector{Float64}     # ∂_r of pFlux
+    aBeta::Vector{Float64}      # aβ
+    fFlux::Vector{Float64}      # βΦ + (1-β)Π  (= ∂_t φ)
+    pFlux::Vector{Float64}      # J²(βΠ + (1-β)Φ)
+    vacuum_a_rhs::Vector{Float64}  # discrete Schwarzschild ∂_t a (well-balancing)
+    vacuum_B_rhs::Vector{Float64}  # discrete Schwarzschild ∂_t B (well-balancing)
 end
 
 function Workspace(r::Vector{Float64})
@@ -65,9 +72,11 @@ function rhs!(du::Matrix{Float64}, u::Matrix{Float64}, f::Float64,
     n=length(w.r); h=p.dr
     @views begin
         a=u[:,IA]; B=u[:,IB]; Phi=u[:,IPHI]; Pi=u[:,IPI]
+        # 1. Radial derivatives of the state.
         deriv4!(w.dB,B,h)
         deriv4!(w.dAmetric,a,h)
         deriv4!(w.dPhi,Phi,h)
+        # 2. Horizon locking. α = a(1-ḟ)/(1+aJB) > 0 requires ḟ < 1.
         fd=fdot_horizon(u,f,p)
         fd < 1 || error(@sprintf("MMIEF lapse collapse (fdot=%.4g >= 1)",fd))
         @inbounds for i in 1:n
@@ -75,7 +84,9 @@ function rhs!(du::Matrix{Float64}, u::Matrix{Float64}, f::Float64,
             (isfinite(ai) && ai>0 && Ji>0) || error("Invalid geometry at index $i")
             w.J[i]=Ji
         end
+        # 3. A from the momentum constraint.
         reconstruct_A!(w.A,u,w.J,w.dB)
+        # 4. Shift and scalar fluxes. The lapse is never formed: α/a = 1-β.
         @inbounds for i in 1:n
             Ji=w.J[i]; ai=a[i]; Bi=B[i]
             q=ai*Ji*Bi; den=1+q
@@ -86,14 +97,20 @@ function rhs!(du::Matrix{Float64}, u::Matrix{Float64}, f::Float64,
             w.fFlux[i]=beta*Phi[i]+(1-beta)*Pi[i]
             w.pFlux[i]=Ji^2*(beta*Pi[i]+(1-beta)*Phi[i])
         end
+        # 5. Derivatives of the gauge and flux arrays.
         deriv4!(w.dBeta,w.beta,h)
         deriv4!(w.dABeta,w.aBeta,h)
         deriv4!(w.dFFlux,w.fFlux,h)
         deriv4!(w.dPFlux,w.pFlux,h)
+        # 6. Assemble the RHS; later calls overwrite or add to earlier ones:
+        #    interior equations, then KO dissipation, then the outer-boundary row.
         gravity_rhs!(du,u,w.J,w.A,w.beta,w.dB,w.dBeta,w.dABeta)
         scalar_rhs!(du,u,w.J,fd,w.dFFlux,w.dPFlux,w.fFlux)
         ko6!(du,u,h,p.ko_strength)
         outer_rhs!(du,u,w.J,w.beta,fd,w.dAmetric,w.dB,w.dPhi,w.dBeta)
+        # 7. Well-balancing: remove the O(dr⁴) discrete residual of exact
+        #    Schwarzschild from the a and B equations, so the vacuum background
+        #    stays static. This also hides that residual in vacuum tests.
         if subtract_background
             @inbounds for i in 1:n
                 du[i,IA]-=w.vacuum_a_rhs[i]
@@ -105,8 +122,8 @@ function rhs!(du::Matrix{Float64}, u::Matrix{Float64}, f::Float64,
 end
 
 struct EvolutionWorkspace
-    rk4::RK4Workspace
-    rhswork::Workspace
+    rk4::RK4Workspace     # RK4 stage storage
+    rhswork::Workspace    # RHS scratch arrays and well-balancing vectors
 end
 EvolutionWorkspace(u::Matrix{Float64},r::Vector{Float64}) =
     EvolutionWorkspace(RK4Workspace(u),Workspace(r))
@@ -115,8 +132,11 @@ EvolutionWorkspace(u::Matrix{Float64},r::Vector{Float64}) =
 function evolve_one_step!(u::Matrix{Float64},f::Float64,dt::Float64,
                           p::Config,w::EvolutionWorkspace)
     rhs_eval! = (du,x,shift)->rhs!(du,x,shift,p,w.rhswork)
+    # Each stage: re-solve a from the Hamiltonian constraint, then impose the
+    # outer scalar condition.
     project! = (x,shift)->project_hamiltonian!(x,shift,p,w.rhswork.r)
     boundary! = (x,shift)->outer_projection!(x,shift,p,w.rhswork.r)
+    # Horizon residual aJB - 1 of the raw update, recorded before projection.
     preprojection = (x,shift)->x[1,IA]*(w.rhswork.r[1]+shift)*x[1,IB]-1
     model=MOLSystem(rhs_eval!,project!,boundary!,preprojection)
     return mol_step!(u,f,dt,w.rk4,model)
@@ -147,6 +167,7 @@ function run_evolution(p::Config; verbose::Bool=true)
                 length(r),d.M_out,d.ham_l2,abs(d.horizon_error))
     end
     t=0.0; step=0
+    # Next times at which to store a sample, a snapshot and a progress line.
     next_sample=p.output_dt
     next_frame=p.snapshot_dt
     next_report=25*p.M0
@@ -191,6 +212,7 @@ function run_evolution(p::Config; verbose::Bool=true)
                 sample_fixed_J(u,r,f,J_obs,p;time=t)
             end
         end
+        # Cheap periodic sanity check of the whole state.
         if step%20==0
             @views av=u[:,IA]
             if !all(isfinite,u) || !isfinite(f) || minimum(av)<=0
@@ -217,7 +239,12 @@ function run_evolution(p::Config; verbose::Bool=true)
     data.final_state=copy(u)
     return data
 end
-"""Zero-field Schwarzschild invariance test: reports discrete RHS residuals."""
+"""
+Zero-field Schwarzschild invariance test: reports discrete RHS residuals.
+
+Returns max |∂_t u| per state column for exact Schwarzschild data. Well-balancing
+is on, so near-zero values check the implementation, not the truncation error.
+"""
 function vacuum_test(; dr::Float64=0.25,rmax::Float64=100.0)
     p=Config(dr=dr,rmax=rmax,tmax=1.0,pulse_amplitude=0.0)
     r=radial_grid(p)

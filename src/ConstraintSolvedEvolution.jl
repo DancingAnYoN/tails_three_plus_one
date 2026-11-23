@@ -6,6 +6,11 @@ module ConstraintSolvedEvolution
 # Hamiltonian constraint at every RK4 stage.
 # The momentum constraint determines A from B'.
 # B remains an evolved Einstein variable.
+#
+# Evolved state: B, Φ, Π, φ (columns of u) and the scalar f. Column a is kept
+# in u for compatibility with the shared modules, but its RHS is always zero
+# and its value is overwritten by project_constraints!. This is constraint-
+# solved, not "fully constrained" (see CONSTRAINED_FORMULATION.md §1).
 
 using Printf
 using ..Types: Config, IA, IB, IPHI, IPI, IFIELD
@@ -26,22 +31,24 @@ using ..DataOutput: RunData, store_sample!, store_frame!
 export run_constraint_solved, project_constraints!, constrained_rhs!,
        ConstrainedWorkspace, vacuum_constrained_rhs
 
+# Preallocated RHS arrays; same meaning as Evolution.Workspace ("d" = ∂_r).
+# Only the B equation is well-balanced here, because a is not evolved.
 mutable struct ConstrainedWorkspace
-    r::Vector{Float64}
-    J::Vector{Float64}
-    A::Vector{Float64}
-    beta::Vector{Float64}
-    da::Vector{Float64}
-    dB::Vector{Float64}
-    dPhi::Vector{Float64}
-    dBeta::Vector{Float64}
-    dABeta::Vector{Float64}
-    dFFlux::Vector{Float64}
-    dPFlux::Vector{Float64}
-    aBeta::Vector{Float64}
-    fFlux::Vector{Float64}
-    pFlux::Vector{Float64}
-    vacuum_B_rhs::Vector{Float64}
+    r::Vector{Float64}          # grid coordinates
+    J::Vector{Float64}          # areal radius r + f
+    A::Vector{Float64}          # K^r_r from the momentum constraint
+    beta::Vector{Float64}       # shift β
+    da::Vector{Float64}         # ∂_r a (only fed to outer_rhs!, whose a row is then zeroed)
+    dB::Vector{Float64}         # ∂_r B
+    dPhi::Vector{Float64}       # ∂_r Φ
+    dBeta::Vector{Float64}      # ∂_r β
+    dABeta::Vector{Float64}     # ∂_r(aβ)
+    dFFlux::Vector{Float64}     # ∂_r[βΦ + (1-β)Π]
+    dPFlux::Vector{Float64}     # ∂_r[J²(βΠ + (1-β)Φ)]
+    aBeta::Vector{Float64}      # aβ
+    fFlux::Vector{Float64}      # βΦ + (1-β)Π  (= ∂_t φ)
+    pFlux::Vector{Float64}      # J²(βΠ + (1-β)Φ)
+    vacuum_B_rhs::Vector{Float64}  # discrete Schwarzschild ∂_t B (well-balancing)
 end
 
 function ConstrainedWorkspace(r::Vector{Float64})
@@ -68,6 +75,9 @@ function project_constraints!(u::Matrix{Float64}, f::Float64,
     last_a = NaN
     last_pi = NaN
     converged = false
+    # The two projections are coupled: the outer Π enters the mass integral
+    # (and hence a at r_max), and a at r_max enters the outer scalar condition.
+    # Alternate them until the outer values stop changing.
     for _ in 1:12
         project_hamiltonian!(u, f, p, r)
         outer_projection!(u, f, p, r)
@@ -121,6 +131,8 @@ function constrained_rhs!(du::Matrix{Float64},u::Matrix{Float64},f::Float64,
                 error("Invalid geometry at grid index $i")
             w.J[i] = Ji
         end
+        # A from the momentum constraint; then shift and scalar fluxes
+        # (the lapse is never formed: α/a = 1-β).
         reconstruct_A!(w.A,u,w.J,w.dB)
         @inbounds for i in 1:n
             Ji=w.J[i]
@@ -137,6 +149,7 @@ function constrained_rhs!(du::Matrix{Float64},u::Matrix{Float64},f::Float64,
         deriv4!(w.dABeta,w.aBeta,p.dr)
         deriv4!(w.dFFlux,w.fFlux,p.dr)
         deriv4!(w.dPFlux,w.pFlux,p.dr)
+        # Interior equations, KO dissipation, then the outer-boundary row.
         gravity_rhs!(du,u,w.J,w.A,w.beta,w.dB,w.dBeta,w.dABeta)
         scalar_rhs!(du,u,w.J,fd,w.dFFlux,w.dPFlux,w.fFlux)
         ko6!(du,u,p.dr,p.ko_strength)
@@ -168,6 +181,11 @@ function set_vacuum_balance!(p::Config,w::ConstrainedWorkspace)
     return nothing
 end
 
+"""
+Vacuum check for the constraint-solved RHS: returns `(maximum_rhs, fdot,
+horizon_error)` for exact Schwarzschild data. Well-balancing is on, so a
+near-zero `maximum_rhs` checks the implementation, not the truncation error.
+"""
 function vacuum_constrained_rhs(;dr::Float64=0.5, rmax::Float64=70.0)
     p=Config(dr=dr,rmax=rmax,tmax=1.0,pulse_amplitude=0.0)
     r=radial_grid(p)
@@ -202,11 +220,14 @@ function run_constraint_solved(p::Config;verbose::Bool=true)
     set_vacuum_balance!(p,w)
     rk=RK4Workspace(u)
     eval_rhs! = (du,x,shift)->constrained_rhs!(du,x,shift,p,w)
+    # project_constraints! already includes the outer scalar projection, so
+    # the separate boundary hook is a no-op.
     project! = (x,shift)->project_constraints!(x,shift,p,r)
     noop! = (x,shift)->nothing
     prior_residual = (x,shift)->x[1,IA]*(r[1]+shift)*x[1,IB]-1
     diag0=diagnostics(u,f,r,p)
     outer_mass0=diag0.M_out
+    # Fail-fast tolerance for unphysical horizon growth (not an error estimate).
     budget_tol=max(p.mass_budget_fraction*p.M0,
                    0.1*max(0.0,outer_mass0-p.M0))
     data=RunData(p,r,u)
@@ -221,6 +242,8 @@ function run_constraint_solved(p::Config;verbose::Bool=true)
     next_frame=p.snapshot_dt
     next_report=25*p.M0
     while t < p.tmax-1e-12
+        # Time step from the largest coordinate speed: scalar speeds -1 and
+        # 1-2β, plus the shift β that advects B.
         fd=fdot_horizon(u,f,p)
         vmax=1.0
         @inbounds for i in eachindex(r)

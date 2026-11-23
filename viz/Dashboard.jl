@@ -1,3 +1,6 @@
+# Six-panel GLMakie dashboard for a saved run: pulse profile, masses, observer
+# waveforms, log–log tail, local decay exponent and constraint residuals.
+# Optionally animates the stored snapshots into dashboard.mp4.
 module Dashboard
 using GLMakie
 using Printf
@@ -14,10 +17,15 @@ The QNM fit and tail indicators are exploratory, not convergence-certified.
 
 @inline p2(x::Real, y::Real) = Point2f(Float32(x), Float32(y))
 
+# Helpers turning the first n samples of a time series into plot points, with
+# time in units of M. Used to reveal the histories frame by frame.
+
+# (t/M, y)
 function trace_points(t, y, n, M)
     return Point2f[p2(t[i] / M, y[i]) for i in 1:n]
 end
 
+# (log10 t/M, log10 |y|), skipping t <= 0 and |y| below 1e-28.
 function log_points(t, y, n, M)
     points = Point2f[]
     for i in 1:n
@@ -28,10 +36,12 @@ function log_points(t, y, n, M)
     return points
 end
 
+# (t/M, log10 |y|) with |y| floored at 1e-18 so exact zeros stay plottable.
 function residual_points(t, y, n, M)
     return Point2f[p2(t[i] / M, log10(max(abs(y[i]), 1e-18))) for i in 1:n]
 end
 
+# (t/M, y) for finite local power indices inside the plotted range [-4, 12].
 function lpi_points(t, y, n, M)
     points = Point2f[]
     for i in 1:n
@@ -62,6 +72,7 @@ function make_dashboard(data::RunData;
     T = times .- data.shifts
     npts = length(T)
     nframes = length(data.frame_times)
+    # Reference waveform for the fit and the tail slope: observer nearest J = 30 M0.
     kref = argmin(abs.(p.observers .- 30*M))
     refwave = data.signals[kref]
 
@@ -92,6 +103,8 @@ function make_dashboard(data::RunData;
                           xlabel="t / M₀", ylabel="log₁₀ |residual|")
 
     colors = [:dodgerblue, :darkorange, :seagreen, :purple, :firebrick]
+    # Each plotted line is bound to an Observable; update_frame! below refills
+    # them for a given snapshot, which redraws the figure.
     pulse_obs = Observable(Point2f[])
     horizon_obs = Observable(Float32[2.0])
     lines!(ax_pulse, pulse_obs; color=:royalblue, linewidth=2.5)
@@ -129,6 +142,7 @@ function make_dashboard(data::RunData;
     xlims!(ax_lpi, 0, max(T[end]/M,1.0))
     ylims!(ax_lpi, -1, 8)
 
+    # Overlay the fitted damped sinusoid on its window (rates are per unit M_f).
     if fit !== nothing
         overlay = Point2f[]
         for t in T
@@ -144,6 +158,8 @@ function make_dashboard(data::RunData;
                linewidth=2, label="Exploratory QNM fit")
     end
 
+    # Visual guide only: a T⁻³ line (generic l = 0 Price tail) anchored to the
+    # reference waveform's peak amplitude around T = 150 M0 (or 0.8 T_end).
     if T[end] > 120*M
         tref = 150*M <= T[end] ? 150*M : 0.8*T[end]
         ref_idx = clamp(searchsortedfirst(T, tref), 1, npts)
@@ -170,6 +186,8 @@ function make_dashboard(data::RunData;
            label="Preprojection horizon drift")
     axislegend(ax_constraints, position=:rb)
 
+    # Snapshot k: draw profile k against J = r + f and reveal the time series up
+    # to that snapshot's time.
     r_frame = data.r[1:p.profile_stride:end]
     function update_frame!(k::Int)
         k = clamp(k, 1, nframes)
@@ -194,6 +212,7 @@ function make_dashboard(data::RunData;
         ax_pulse.title = @sprintf("Scalar profile at t/M₀ = %.1f", t/M)
     end
 
+    # The PNG shows the final snapshot; the movie (if requested) steps through all.
     update_frame!(nframes)
     png = joinpath(outdir, "dashboard.png")
     save(png, fig)

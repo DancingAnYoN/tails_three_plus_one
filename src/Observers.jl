@@ -1,3 +1,5 @@
+# Waveform extraction at fixed physical areal radius. Because J = r + f(t), an
+# observer at fixed J_obs sits at the moving grid coordinate r_obs(t) = J_obs - f(t).
 module Observers
 using Printf
 using ..Types: Config, IFIELD
@@ -11,7 +13,7 @@ silently clamping the interpolation point would produce a false waveform.
 """
 function sample_fixed_J(u::Matrix{Float64}, r::Vector{Float64}, f::Float64,
                         J_obs::Float64, p::Config; time::Float64=NaN)
-    x = J_obs-f
+    x = J_obs-f    # grid coordinate of the observer at this time
     if !(isfinite(x) && r[1] <= x <= r[end])
         fd = isfinite(f) ? fdot_horizon(u,f,p) : NaN
         error(@sprintf("""
@@ -27,8 +29,12 @@ function sample_fixed_J(u::Matrix{Float64}, r::Vector{Float64}, f::Float64,
         (r[1]+f)/(2*p.M0), fd, p.pulse_amplitude))
     end
     n = length(r)
+    # Four-point stencil i0..i0+3 with x between its 2nd and 3rd points.
+    # Near the grid edges the *stencil* is shifted inward (off-centred);
+    # the sample point x itself is never moved.
     i0 = clamp(floor(Int,(x-r[1])/p.dr),1,n-3)
     i0 = max(1,i0)  # 4-point stencil i0:i0+3
+    # Lagrange form: φ(x) = Σ_j φ_j Π_{k≠j} (x - r_k)/(r_j - r_k).
     val = 0.0
     @inbounds for j in i0:i0+3
         w = 1.0

@@ -1,3 +1,5 @@
+# Animation of the computed scalar pulse (Jφ against areal radius J) with the
+# horizon growth curve and a spacetime map on the fixed grid r.
 module PulseMovie
 using GLMakie
 using Printf
@@ -30,8 +32,10 @@ function make_pulse_movie(data::RunData;
     nframes >= 2 || error("At least two saved snapshots are needed to make a movie")
     every >= 1 || error("every must be >= 1")
     fps >= 1 || error("fps must be >= 1")
+    # Every `every`-th snapshot, always ending on the last one.
     frames=collect(1:every:nframes)
     frames[end] != nframes && push!(frames, nframes)
+    # Grid points at which snapshots were stored.
     rvec=data.r[1:p.profile_stride:end]
     nr=length(rvec)
     all(length(profile)==nr for profile in data.frame_profiles) ||
@@ -43,6 +47,7 @@ function make_pulse_movie(data::RunData;
     normalized=[Float64.(profile)./scale for profile in data.frame_profiles]
     amplitude=max(maximum(maximum(abs, profile) for profile in normalized), 1e-9)
     ymax=1.18*amplitude
+    # Largest J/M0 shown: radial_max, but never beyond the grid edge.
     jmax=min(Float64(radial_max), (data.r[end]+minimum(data.frame_shift))/M)
     jmax>3 || error("radial_max must extend beyond the horizon")
 
@@ -110,6 +115,8 @@ function make_pulse_movie(data::RunData;
         "Constrained evolution | Numerics require convergence tests",
         fontsize=14,color=RGBf(0.35,0.42,0.49))
 
+    # Draw snapshot k: pulse against J = r + f, shaded region inside the
+    # horizon J_h = 2M0 + f, mass curve and spacetime map up to time t_k.
     last_filled=Ref(0)
     function update!(k::Int)
         t=data.frame_times[k]

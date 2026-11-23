@@ -149,7 +149,11 @@ The evolution is **partially constrained**, not unconstrained ADM.
 - `legacy/MMIEFCore.jl`: frozen regression oracle.
 
 Run data schema: `results/<mode>/config.toml`, `metadata.toml`,
-`diagnostics.csv`, `observers.csv`, `snapshots.csv`, `final_state.csv`.
+`diagnostics.csv`, `observers.csv`, `snapshots.csv`, `final_state.csv`,
+plus one `phi_J<J>.csv` (`t,phi`) per observer. Observer radii and final
+coordinate time are selectable with `--J` and `--tmax` in both run scripts.
+`scripts/run_TJ.jl T J` is the one-command constraint-solved run: automatic
+boundary-free domain `rmax >= T + J + 10`, output `results/T<T>_J<J>_run/`.
 The source-only GitHub archive excludes generated result data.
 
 ## 9. How to run (project root)
@@ -178,7 +182,13 @@ julia --project=viz scripts/render_dashboard.jl results/standard
 julia --project=viz scripts/render_movie.jl results/standard
 julia --project=viz scripts/render_observer_history.jl results/standard
 julia --project=viz scripts/render_qnm_visualization.jl results/standard
+julia --project=viz scripts/render_tail.jl results/standard
 ```
+
+`render_tail.jl` writes `tail_loglog.png` (log–log |φ| vs T and the local
+index p(T) from `MMIEF.local_loglog_slope`); the run scripts call it with
+`--plot`. The older peak-envelope `local_power_index` (dashboard) is biased high
+by about T/(T−h) on a monotone tail (h = envelope half-width, 12 M0 there).
 
 REPL simulation entry point: `include("run_simulation.jl"); main(["--standard"])`.
 REPL movie entry: `include("scripts/render_movie.jl"); movie_main(["results/standard"])`.

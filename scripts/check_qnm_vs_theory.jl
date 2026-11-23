@@ -13,21 +13,34 @@ using Printf
 # Load interpretation code at top-level to avoid Julia 1.12 world-age issues.
 include(joinpath(@__DIR__, "interpret_qnm_results.jl"))
 
+# Fundamental scalar l = 0 Schwarzschild QNM, M_f ω = 0.110455 - 0.104896 i
+# with time dependence exp(-iωT). Not the gravitational l = 2 mode.
 const SCALAR_L0_OMEGA_R = 0.110455
 const SCALAR_L0_GAMMA   = 0.104896
 
-# Schwarzschild tortoise radius, used only to shift proposed fit windows
-# between observers. This is a heuristic delay, not a QNM fit parameter.
-function schwarzschild_tortoise(J::Float64, M::Float64)
-    J > 2M || throw(ArgumentError("Observer must lie outside final Schwarzschild radius"))
-    return J + 2M * log(J / (2M) - 1)
+# Stationary outgoing null delay from J_ref to J in MMIEF observer time on the
+# final Schwarzschild background of mass M. There β = 2M/(J+2M), so outgoing
+# rays move with dJ/dT = 1 - 2β = (J-2M)/(J+2M), giving
+#     ΔT = (J - J_ref) + 4M ln[(J-2M)/(J_ref-2M)]      (AGENTS.md).
+# A difference of Schwarzschild tortoise radii (coefficient 2M) measures
+# Schwarzschild time instead and would under-shift by 2M ln[...], about 2.5M
+# between J = 10 and 30. Used only to shift the proposed fit windows between
+# observers; a heuristic delay, not a QNM fit parameter.
+function mmief_outgoing_delay(J::Float64, J_ref::Float64, M::Float64)
+    (J > 2M && J_ref > 2M) ||
+        throw(ArgumentError("Observers must lie outside the final horizon radius 2M"))
+    return (J - J_ref) + 4M * log((J - 2M) / (J_ref - 2M))
 end
 
+# Fit five windows at each observer, print the fitted M_f ω_R and M_f γ with
+# their percentage deviation from the reference mode, write qnm_comparison.csv
+# into the run directory, then run the automatic interpretation.
 function qnm_check(run_directory::AbstractString="results/standard")
     run_dir = abspath(run_directory)
     data = MMIEF.load_run(run_dir)
     p = data.settings
     M0 = p.M0
+    # Final horizon mass sets the reference frequency scale.
     Mf = data.masses_h[end]
     isfinite(Mf) && Mf > 0 || error("Final horizon mass must be positive and finite")
     T = data.times .- data.shifts  # Asymptotically normalized time in MMIEF gauge.
@@ -48,20 +61,19 @@ function qnm_check(run_directory::AbstractString="results/standard")
     baseline_windows = ((35.0,80.0), (40.0,90.0), (45.0,100.0),
                         (50.0,110.0), (55.0,120.0))
     J_ref = 30*M0
-    rstar_ref = schwarzschild_tortoise(J_ref, Mf)
     out_path = joinpath(run_dir, "qnm_comparison.csv")
     open(out_path, "w") do io
         println(io, "J_over_M0,Tlo_over_M0,Thi_over_M0,Mf_omegaR,Mf_gamma,omegaR_error_pct,gamma_error_pct,relative_fit_residual")
         for (j, J) in enumerate(p.observers)
             phi = data.signals[j]
-            rstar_shift = schwarzschild_tortoise(J, Mf) - rstar_ref
-            @printf("\nObserver J/M0 = %.1f (estimated time shift %.2f M0)\n",
-                    J/M0, rstar_shift/M0)
+            shift = mmief_outgoing_delay(J, J_ref, Mf)
+            @printf("\nObserver J/M0 = %g (outgoing delay from J = 30 M0: %.2f M0)\n",
+                    J/M0, shift/M0)
             @printf("  %12s %12s %13s %13s %12s %12s %12s\n",
                     "Tlo/M0", "Thi/M0", "Mf*omegaR", "Mf*gamma", "deltaR %", "deltaI %", "fit err")
             for (left, right) in baseline_windows
-                tlo = M0*left + rstar_shift
-                thi = M0*right + rstar_shift
+                tlo = M0*left + shift
+                thi = M0*right + shift
                 if tlo < T[1] || thi > T[end]
                     @printf("  %12.2f %12.2f  (window outside saved data)\n", tlo/M0, thi/M0)
                     continue

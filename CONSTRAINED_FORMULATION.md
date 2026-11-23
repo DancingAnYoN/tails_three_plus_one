@@ -150,8 +150,16 @@ results/constrained_standard/
 ```
 
 Each contains standard `diagnostics.csv`, `observers.csv`, `snapshots.csv`,
-`final_state.csv`, `metadata.toml`, and `config.toml`. `metadata.toml`
-identifies the constraint-solved evolution method.
+`final_state.csv`, `metadata.toml`, and `config.toml`, plus one
+`phi_J<J>.csv` with `(t, phi)` per observer. `metadata.toml` identifies the
+constraint-solved evolution method. `--J J1[,J2,...]` and `--tmax T` (units of
+M0) override the preset's observer radii and final coordinate time.
+
+For a single run at chosen `(T, J)` without presets, use
+`julia --project=. scripts/run_TJ.jl 600 30`. It places the outer boundary at
+`rmax >= T + J + 10` (no boundary signal reaches the observer), uses Courant
+number 0.125 so samples fall exactly on multiples of `output_dt` for
+`dr = 2^-k`, and writes `results/T600_J30_run/` plus `tail_loglog.png`.
 
 ## 7. GLMakie visualization
 

@@ -1,3 +1,9 @@
+# Plot observer waveforms together with the ringdown fits saved by
+# scripts/check_qnm_vs_theory.jl (qnm_comparison.csv), and compare the fitted
+# frequencies with the scalar l = 0 Schwarzschild mode.
+#   julia --project=viz scripts/render_qnm_visualization.jl results/standard [--show]
+# Writes qnm_overview.png and qnm_fit_J<J>.png into the run directory.
+# Standalone: reads the CSV/TOML files directly and does not load MMIEF.
 using Printf
 using GLMakie
 
@@ -9,6 +15,8 @@ function _split_csv_line(line::String)
     return String.(strip.(split(chomp(line), ',')))
 end
 
+# Read a CSV into Dict(column name => column of strings); rows are padded or
+# truncated to the header length.
 function read_simple_csv(path::AbstractString)
     isfile(path) || error("CSV file not found: $path")
     lines = readlines(path)
@@ -30,6 +38,7 @@ function read_simple_csv(path::AbstractString)
     return cols
 end
 
+# First column matching one of `aliases` (case-insensitive, in alias order).
 function find_col(cols::AbstractDict{<:AbstractString,<:AbstractVector{<:AbstractString}}, aliases::Vector{String})
     keys_lower = Dict(lowercase(k) => k for k in keys(cols))
     for alias in aliases
@@ -41,8 +50,10 @@ function find_col(cols::AbstractDict{<:AbstractString,<:AbstractVector{<:Abstrac
     return nothing
 end
 
+# Parse a field as Float64; unparsable or empty fields become NaN.
 tofloat(s::AbstractString) = try parse(Float64, s) catch; NaN end
 
+# (column name, parsed values) for the first matching alias, or (nothing, []).
 function get_num_col(cols::AbstractDict{<:AbstractString,<:AbstractVector{<:AbstractString}}, aliases::Vector{String})
     key = find_col(cols, aliases)
     key === nothing && return nothing, Float64[]
@@ -52,6 +63,8 @@ end
 # -------------------------
 # Data extraction
 # -------------------------
+# (M0, Mf): initial mass from config.toml and final horizon mass from the
+# last finite M_h in diagnostics.csv (falls back to Mf = M0 if it is missing).
 function run_mass_scales(run_dir::AbstractString)
     config_path = joinpath(run_dir, "config.toml")
     isfile(config_path) || error("Missing config.toml: $config_path")
@@ -83,6 +96,8 @@ function run_mass_scales(run_dir::AbstractString)
     return M0, Mf
 end
 
+# Dict(J_obs/M0 => (T/M0, φ)) from observers.csv, each series sorted in time.
+# Prefers the observer time T_asymptotic = t - f over coordinate time.
 function load_observer_data(run_dir::AbstractString, M0::Float64)
     path = joinpath(run_dir, "observers.csv")
     cols = read_simple_csv(path)
@@ -109,6 +124,8 @@ function load_observer_data(run_dir::AbstractString, M0::Float64)
     return groups
 end
 
+# All fit rows of qnm_comparison.csv as NamedTuples (radii and windows in units
+# of M0, frequencies in units of 1/Mf); `nothing` if the file does not exist.
 function load_qnm_comparison(run_dir::AbstractString, M0::Float64)
     path = joinpath(run_dir, "qnm_comparison.csv")
     isfile(path) || return nothing
@@ -152,6 +169,8 @@ function load_qnm_comparison(run_dir::AbstractString, M0::Float64)
     return rows
 end
 
+# For each observer, keep the fit window with the smallest relative residual.
+# Note: lowest residual is not the same as most reliable frequency estimate.
 function best_fit_rows(rows)
     rows === nothing && return Dict{Float64,NamedTuple}()
     byJ = Dict{Float64,Vector{NamedTuple}}()
@@ -175,6 +194,9 @@ end
 # -------------------------
 # Ringdown model helper
 # -------------------------
+# Least-squares fit of e^{-γτ}(c1 cos ωτ + c2 sin ωτ), τ = t - t[1], with ω and γ
+# held fixed (only the two amplitudes are fitted). Returns
+# (model values, c1, c2, relative residual ‖fit - y‖/‖y‖).
 function build_ringdown_model(t::Vector{Float64}, y::Vector{Float64}, omega::Float64, gamma::Float64)
     isempty(t) && return Float64[], NaN, NaN, NaN
     dt = t .- t[1]
@@ -196,6 +218,7 @@ function build_ringdown_model(t::Vector{Float64}, y::Vector{Float64}, omega::Flo
     return yfit, coeff_c, coeff_s, relative_residual
 end
 
+# Key of `dict` closest to `target` (nothing if empty).
 function nearest_key(dict::Dict{Float64,<:Any}, target::Float64)
     ks = collect(keys(dict))
     isempty(ks) && return nothing
@@ -205,7 +228,10 @@ end
 # -------------------------
 # Plotting
 # -------------------------
+# Build qnm_overview.png (waveforms, log amplitude, fitted windows, fitted vs
+# theoretical frequencies) and one qnm_fit_J<J>.png per observer with a fit.
 function make_qnm_overview(run_dir::AbstractString; show_window::Bool=false)
+    # Scalar l = 0 fundamental Schwarzschild mode, M_f ω = 0.110455 - 0.104896 i.
     theory_wR = 0.110455
     theory_g  = 0.104896
 

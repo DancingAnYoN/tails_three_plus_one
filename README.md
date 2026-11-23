@@ -7,6 +7,35 @@ Hamiltonian projection at intermediate stages and Schwarzschild discrete
 residual subtraction. Ingoing null slicing: `alpha=a*(1-beta)`; shifted
 areal radius: `J=r+f(t)`.
 
+## 0. Quickest route: one run for a chosen (T, J)
+
+```powershell
+julia --project=. scripts/run_TJ.jl 600 30          # T = 600 M0, J = 30 M0
+julia --project=. scripts/run_TJ.jl 600 10,30,50    # several observers
+julia --project=. scripts/run_TJ.jl 600 30 --dr 0.5 --no-plot
+```
+
+REPL: `include("scripts/run_TJ.jl"); run_TJ(600, 30)`.
+
+Fit the tail `phi = A t^-gamma exp(B/t + C/t^2)` of a finished run (linear
+least squares in `ln|phi|`; also prints simpler models and the dependence on
+the window start, and writes `tail_fit.csv`, `tail_fit_J<J>.csv`):
+
+```powershell
+julia --project=. scripts/fit_tail.jl results/T1000_J30_run --tmin 250
+```
+
+This runs the constraint-solved scheme (`a` and `A` from the constraints at
+every RK4 stage, `B` evolved; see `CONSTRAINED_FORMULATION.md`) up to
+coordinate time `t = T`. The outer boundary is placed automatically at
+`rmax >= T + J + 10`, so no boundary signal can reach the observer. Results
+go to `results/T600_J30_run/` (`results/T600_J10-30-50_run/`,
+`results/T600_J30_dr0.5_run/` for the other examples), including
+`phi_J30.csv` with `(t, varphi(t,J))` sampled every `0.5 M0` and the tail
+plot `tail_loglog.png` (needs the `viz/` environment, section 2). Rerunning
+the same parameters overwrites the run files in that folder; other files you
+put there are kept.
+
 ## 1. Install and run the numerical solver (no GLMakie needed)
 
 Open the folder `MMIEF_Modular` in VS Code, start a Julia REPL, and type:
@@ -31,6 +60,39 @@ julia --project=. scripts/run_simulation.jl --quick
 Available simulation sizes are `--smoke`, `--quick`, `--standard`, `--long`;
 add `--vacuum` for Schwarzschild vacuum. Results go into
 `results/smoke_vacuum/`, `results/quick/`, etc.
+
+On top of a size you can choose the observers and the run length (units of
+`M0`; both options also work with `scripts/run_constrained.jl`):
+
+```powershell
+julia --project=. scripts/run_simulation.jl --standard --J 30 --tmax 600
+julia --project=. scripts/run_simulation.jl --long --J 10,30,50,100 --tmax=1200
+```
+
+- `--J J1[,J2,...]`: fixed areal radii `J_obs` at which `varphi` is sampled
+  (default `10,30,50`); each must satisfy `2M0 < J_obs < rmax` of the preset.
+- `--tmax T`: final **coordinate** time `t_max` (default: the preset value).
+- With either option the results go to a folder named after the run, e.g.
+  `results/standard_T600_J30/` or `results/constrained_long_T1200_J10-30-50-100/`,
+  so the preset folder `results/standard/` is never overwritten.
+  Observer time `T=t-f` differs from `t` by `f=2(M_h-M0)`, which is tiny for
+  the default weak pulse.
+
+Each observer gets a two-column file `phi_J<J>.csv` (header `t,phi`) holding
+`(t, varphi(t,J_obs))` at every output sample (cadence `output_dt=0.5`). The
+script warns when `t_max > rmax - J_obs`: after that time the outer boundary
+can influence the observer, so use a larger preset for late-time tails.
+In the REPL: `main(["--standard", "--J", "30", "--tmax", "600"])`.
+
+Add `--plot` to also write `tail_loglog.png` into the run directory: log–log
+`|varphi|` against `T=t-f` with a `T^-3` guide, and the local power index
+`p(T)=-d ln|varphi|/d ln T`. It runs `scripts/render_tail.jl` in a separate
+process with the `viz/` environment (set up once, section 2); if that fails,
+the run data are still saved. For an existing run directory:
+
+```powershell
+julia --project=viz scripts/render_tail.jl results/standard
+```
 
 **Do not** use `--no-movie` or `--no-gl` with the numerical runner: visualization
 is now a separate process. This is intentional.
@@ -83,6 +145,8 @@ Every run directory contains:
 - `metadata.toml`: schema v1, coordinate and unit conventions.
 - `diagnostics.csv`: horizon mass, outer mass and constraint norms.
 - `observers.csv`: long-format `(t,T_asymptotic,J_obs,phi)` time series.
+- `phi_J<J>.csv`: one per observer, `(t,phi)` at that `J_obs` (same samples
+  as `observers.csv`; not read by `load_run`).
 - `snapshots.csv`: long-format `(t,f,r,J,Jphi)` movie input data.
 - `final_state.csv`: complete five-column evolved state at final time.
 

@@ -17,6 +17,8 @@ export interpret_qnm
 const THEORY_OMEGA_R_M = 0.110455
 const THEORY_GAMMA_M   = 0.104896
 
+# Read a header + numeric-rows CSV into one Dict(column => value) per row.
+# Fails if any `required` column is missing or a cell is not a number.
 function _read_numeric_csv(path::AbstractString, required::Vector{String})
     isfile(path) || error("Missing file: $path. Run qnm_check(\"results/standard\") first.")
     rows = readlines(path)
@@ -44,9 +46,12 @@ function _median(values::Vector{Float64})
     return isodd(n) ? ordered[(n+1)÷2] : (ordered[n÷2]+ordered[n÷2+1])/2
 end
 
+# Signed deviation from the reference, in percent.
 _pct_error(x, ref) = 100.0 * (x / ref - 1.0)
+# Full range (max - min) of the estimates as a percentage of the reference.
 _spread_pct(x, ref) = length(x) < 2 ? NaN : 100.0 * (maximum(x)-minimum(x))/ref
 
+# Linear interpolation of ys(xs) at x; `nothing` outside [xs[1], xs[end]].
 function _linear_sample(xs::Vector{Float64}, ys::Vector{Float64}, x::Float64)
     length(xs) == length(ys) || error("Diagnostic time/mass length mismatch")
     isempty(xs) && return nothing
@@ -58,6 +63,8 @@ function _linear_sample(xs::Vector{Float64}, ys::Vector{Float64}, x::Float64)
     return (1-w)*ys[i] + w*ys[i+1]
 end
 
+# Horizon-mass history M_h(T) from diagnostics.csv, with M0 from config.toml.
+# Returns `nothing` when either file is missing (mass checks are then skipped).
 function _mass_history(run_dir::AbstractString)
     diagnostic_path = joinpath(run_dir, "diagnostics.csv")
     config_path = joinpath(run_dir, "config.toml")
@@ -77,6 +84,7 @@ function _mass_history(run_dir::AbstractString)
     return (M0=M0, Mf=mh[end], ts=ts, mass=mh)
 end
 
+# Fixed-point formatting that prints "n/a" for NaN or Inf.
 _fmt(x;digits=4) = isfinite(x) ? @sprintf("%.*f", digits, x) : "n/a"
 
 """
@@ -101,6 +109,7 @@ function interpret_qnm(run_directory::AbstractString="results/standard";
     required = ["J_over_M0","Tlo_over_M0","Thi_over_M0","Mf_omegaR",
                 "Mf_gamma","relative_fit_residual"]
     rows = _read_numeric_csv(joinpath(run_dir,"qnm_comparison.csv"), required)
+    # Keep only finite fits with positive frequency and damping.
     rows = [row for row in rows if all(isfinite, values(row)) &&
              row["Mf_omegaR"]>0 && row["Mf_gamma"]>0 &&
              row["relative_fit_residual"]>=0 &&
@@ -113,6 +122,7 @@ function interpret_qnm(run_directory::AbstractString="results/standard";
     summary_rows = NamedTuple[]
     reasons_by_observer = Vector{String}()
 
+    # Per observer: medians and spreads over the fit windows, then heuristic flags.
     for J_over_M0 in locations
         selected = [r for r in rows if r["J_over_M0"] == J_over_M0]
         w = [r["Mf_omegaR"] for r in selected]
@@ -122,6 +132,8 @@ function interpret_qnm(run_directory::AbstractString="results/standard";
         eR, eI = _pct_error(wmed, THEORY_OMEGA_R_M), _pct_error(gmed, THEORY_GAMMA_M)
         sR, sI = _spread_pct(w, THEORY_OMEGA_R_M), _spread_pct(g, THEORY_GAMMA_M)
         rmed = _median(residuals)
+        # Relative change of M_h across each fit window: the reference mode
+        # assumes a stationary final black hole.
         drifts = Float64[]
         if history !== nothing
             for r in selected
@@ -135,9 +147,11 @@ function interpret_qnm(run_directory::AbstractString="results/standard";
             end
         end
         mass_drift = length(drifts) == length(selected) ? maximum(drifts) : NaN
+        # Number of predicted oscillations in a typical window (period ≈ 56.9 M_f).
         period = 2pi * (history===nothing ? 1.0 : history.Mf) / THEORY_OMEGA_R_M
         M0 = history===nothing ? 1.0 : history.M0
         cycles = _median([M0*(r["Thi_over_M0"]-r["Tlo_over_M0"])/period for r in selected])
+        # Each failed criterion adds a flag; no flags means "plausible candidate".
         flags = String[]
         length(selected) >= min_windows || push!(flags,"fewer than $min_windows fitted windows")
         abs(eR) <= freq_tolerance_pct || push!(flags,"real frequency differs by $( _fmt(abs(eR);digits=1) )%")
@@ -157,6 +171,7 @@ function interpret_qnm(run_directory::AbstractString="results/standard";
                             fit_error=rmed,mass_drift=mass_drift,cycles=cycles,status=status))
     end
 
+    # Machine-readable summary, one row per observer.
     open(summary_path,"w") do io
         println(io,"J_over_M0,windows,Mf_omegaR_median,Mf_gamma_median,omegaR_error_pct,gamma_error_pct,omegaR_window_spread_pct,gamma_window_spread_pct,median_relative_fit_residual,max_horizon_mass_drift_pct,median_predicted_cycles,status")
         for x in summary_rows
@@ -169,6 +184,7 @@ function interpret_qnm(run_directory::AbstractString="results/standard";
         end
     end
 
+    # Human-readable Markdown report.
     open(report_path,"w") do io
         println(io,"# Scalar l=0 QNM interpretation — MMIEF")
         println(io)
@@ -224,9 +240,10 @@ function interpret_qnm(run_directory::AbstractString="results/standard";
         println(io,"- Maximum horizon-mass drift <= $(_fmt(max_horizon_mass_drift_pct;digits=2))% of M_f over the fit windows")
         println(io,"- At least $min_windows windows and preferably more than one expected oscillation per window")
         println(io)
-        println(io,"**Caution:** The scalar l=0 QNM damps rapidly (~9.53 M_f), so single-mode fits over short and overlapping windows can be degenerate. Even a close match does not demonstrate a genuine QNM without grid refinement, boundary independence, fit-window stability, and consistent results at multiple observer radii. Different observer distances introduce travel-time shifts; the checker uses a Schwarzschild tortoise-coordinate approximation.")
+        println(io,"**Caution:** The scalar l=0 QNM damps rapidly (~9.53 M_f), so single-mode fits over short and overlapping windows can be degenerate. Even a close match does not demonstrate a genuine QNM without grid refinement, boundary independence, fit-window stability, and consistent results at multiple observer radii. Different observer distances introduce travel-time shifts; the checker shifts windows by the stationary MMIEF outgoing delay ΔT = ΔJ + 4M_f ln[(J-2M_f)/(J_ref-2M_f)] from J_ref = 30 M0.")
     end
 
+    # Console summary.
     @printf("\nScalar l=0 Schwarzschild prediction: Mf*omegaR=%.6f, Mf*Gamma=%.6f\n",
             THEORY_OMEGA_R_M,THEORY_GAMMA_M)
     if isempty(reasons_by_observer)

@@ -1,3 +1,5 @@
+# Static four-panel summary for constraint-solved runs: observer waveforms
+# (linear and log10), horizon and outer masses, and constraint residuals.
 module ConstrainedHistory
 using MMIEF: RunData
 using GLMakie
@@ -10,6 +12,8 @@ function plot_constraint_solved_history(data::RunData;
     GLMakie.activate!()
     mkpath(outdir)
     M=data.settings.M0
+    # Waveforms are plotted against observer time T = t - f; masses and
+    # constraints against coordinate time t.
     T=(data.times .- data.shifts) ./ M
     t=data.times ./ M
     fig=Figure(size=(1500,1040),fontsize=17)
@@ -31,6 +35,7 @@ function plot_constraint_solved_history(data::RunData;
     lines!(ax3,t,data.masses_h ./ M;label="Horizon",linewidth=2.4,color=:firebrick)
     lines!(ax3,t,data.masses_out ./ M;label="Outer Misner–Sharp mass",
            linestyle=:dash,linewidth=2.0,color=:slategray)
+    # "L₂" labels are RMS values from Diagnostics; 1e-25 avoids log10(0).
     lines!(ax4,t,log10.(abs.(data.ham_l2).+1e-25);
            label="Hamiltonian L₂",linewidth=2.0,color=:dodgerblue)
     lines!(ax4,t,log10.(abs.(data.scalar_constraint_l2).+1e-25);

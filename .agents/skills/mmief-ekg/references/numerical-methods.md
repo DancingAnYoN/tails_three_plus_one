@@ -40,6 +40,14 @@ An optional KO6 term damps high-frequency grid modes.
 | `--long` | 1700 | 0.25 | 800 | 0.5 |
 
 Use `--vacuum` for zero scalar amplitude (vacuum baseline).
+`--J J1[,J2,...]` replaces the observer radii and `--tmax T` the final
+coordinate time (units of M0; both run scripts, via `scripts/run_options.jl`);
+such runs are saved to `results/<mode>[_vacuum]_T<T>_J<J>/`, never to the
+preset folder.
+The scripts warn when `tmax > rmax - J_obs` (outer boundary in the observer's
+causal past). `scripts/run_TJ.jl T J [--dr DR] [--no-plot]` runs the
+constraint-solved scheme with `rmax >= T + J + 10`, Courant number 0.125, and
+writes `results/T<T>_J<J>[_dr<DR>]_run/`.
 
 ## Commands (shell, project root)
 
@@ -66,7 +74,19 @@ julia --project=viz scripts/render_dashboard.jl results/standard
 julia --project=viz scripts/render_movie.jl results/standard
 julia --project=viz scripts/render_observer_history.jl results/standard
 julia --project=viz scripts/render_qnm_visualization.jl results/standard
+julia --project=viz scripts/render_tail.jl results/standard
 ```
+
+`render_tail.jl` (also run by `--plot` in both run scripts) writes
+`tail_loglog.png`: log–log |φ| vs T = t − f with a T⁻³ guide, and p(T) from
+`local_loglog_slope` (direct local fit, only where φ keeps one sign). Do not
+use the peak-envelope `local_power_index` for monotone tails without
+correcting its ≈ T/(T−h) upward bias.
+
+`scripts/fit_tail.jl <run> [--tmin 150]` fits `A t^-γ exp(b1/t + b2/t²)`
+(`MMIEF.fit_tail_model`, linear least squares in ln|φ|) on
+`[tmin, min(t_end, rmax − J)]`, with lower-order models and a window-start
+scan; quote γ with its window spread, and check resolution separately.
 
 `results/standard/` must exist **before** analysis/visualization;
 GitHub source archives omit generated simulation data.
@@ -92,6 +112,7 @@ Use a fresh REPL if old global function definitions conflict.
 - `config.toml`, `metadata.toml`: parameters, units, coordinate conventions.
 - `diagnostics.csv`: time, horizon and outer mass, constraint residuals.
 - `observers.csv`: long-format `t,T_asymptotic,J_obs,phi`.
+- `phi_J<J>.csv`: per observer, `t,phi` (copy of the observers.csv samples).
 - `snapshots.csv`: `t,f,r,J,Jphi`.
 - `final_state.csv`: final `u` (not a restart checkpoint).
 

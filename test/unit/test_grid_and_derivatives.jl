@@ -9,6 +9,12 @@ const FD=MMIEF.FiniteDifferences
     @test g.r[end] ≈ p.rmax
     @test all(isapprox.(diff(g.r),p.dr;atol=1e-14))
     @test_throws ErrorException MMIEF.Grid.radial_grid(Config(dr=-0.1))
+    # (rmax - 2)/dr = 1765.9999999999998 in floating point: the grid must
+    # still end at rmax (floor used to drop the last point).
+    q=Config(rmax=2+0.35*1766,dr=0.35,tmax=1.0)
+    rq=MMIEF.Grid.radial_grid(q)
+    @test length(rq)==1767
+    @test rq[end] ≈ q.rmax
     function derivative_error(h)
         r=collect(2.0:h:12.0)
         v=sin.(r)

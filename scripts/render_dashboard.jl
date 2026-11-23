@@ -1,9 +1,14 @@
+# Render the six-panel diagnostics dashboard (PNG, optionally MP4) from a
+# saved run directory.
 # Requires visualization environment; see README.
 #   julia --project=viz scripts/render_dashboard.jl results/quick
+# Reads the saved CSV/TOML output only; the solver is not rerun.
 import MMIEF
 include(joinpath(@__DIR__,"..","viz","Visualization.jl"))
 import .MMIEFVisualization
 
+# args: run directory, then optional --movie (also write dashboard.mp4) and
+# --show (open a window).
 function render_main(args::Vector{String}=ARGS)
     isempty(args) && error("Usage: render_dashboard.jl <run_directory> [--movie] [--show]")
     run_dir=abspath(args[1])

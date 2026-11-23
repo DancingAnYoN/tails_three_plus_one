@@ -1,9 +1,12 @@
+# Render the scalar-pulse animation from a saved run directory.
 # Requires visualization environment; see README.
 #   julia --project=viz scripts/render_movie.jl results/quick
+# Reads the saved CSV/TOML output only; the solver is not rerun.
 import MMIEF
 include(joinpath(@__DIR__,"..","viz","Visualization.jl"))
 import .MMIEFVisualization
 
+# args: run directory, optionally followed by --show (open a window as well).
 function movie_main(args::Vector{String}=ARGS)
     isempty(args) && error("Usage: render_movie.jl <run_directory> [--show]")
     run_dir=abspath(args[1])
