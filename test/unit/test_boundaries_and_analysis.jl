@@ -74,3 +74,38 @@ end
     # A sign change in the window is rejected.
     @test_throws ErrorException fit_tail_model(t,(t .- 300.0) .* t.^(-4);tmin=150.0)
 end
+
+@testset "MMIEF outgoing delay" begin
+    # Direct Simpson integration of dT/dJ = (J+2M)/(J-2M) along an outgoing ray.
+    M=1.3; J1=10.0; J2=50.0; n=20000; h=(J2-J1)/n
+    g(J)=(J+2M)/(J-2M)
+    integral=h/3*(g(J1)+g(J2)+4*sum(g(J1+(2k-1)*h) for k in 1:n÷2)+
+                  2*sum(g(J1+2k*h) for k in 1:n÷2-1))
+    @test isapprox(mmief_outgoing_delay(J2,J1,M),integral;rtol=1e-10)
+    @test mmief_outgoing_delay(J1,J2,M) ≈ -integral
+    # Larger than the Schwarzschild tortoise difference by 2M ln[(J2-2M)/(J1-2M)].
+    rstar(J)=J+2M*log(J/(2M)-1)
+    @test mmief_outgoing_delay(J2,J1,M)-(rstar(J2)-rstar(J1)) ≈ 2M*log((J2-2M)/(J1-2M))
+    @test_throws ArgumentError mmief_outgoing_delay(2.0,30.0,1.0)
+end
+
+@testset "Joint ringdown + tail fit" begin
+    # Fundamental scalar l=0 mode plus a tail template of comparable size late
+    # in the window, as in a J = 30 run.
+    t=collect(85.0:0.5:200.0); tau=t .- t[1]
+    w,G=0.110455,0.104896
+    mode=exp.(-G .* tau) .* (1.5e-6 .* cos.(w .* tau) .- 0.4e-6 .* sin.(w .* tau))
+    template=0.054 .* t.^(-3) .* exp.(70.0 ./ t .+ 5900.0 ./ t.^2)
+    y=mode .+ 0.8 .* template
+    f=fit_qnm_tail(t,y;tlo=85.0,thi=200.0,tail=template)
+    @test abs(f.omegaM-w)<1e-4 && abs(f.gammaM-G)<1e-4
+    @test isapprox(f.kappa,0.8;rtol=1e-3) && isapprox(f.a,1.5e-6;rtol=1e-3)
+    @test f.rel_rms<1e-3 && f.n==length(t)
+    # Without the tail term the same data give a badly biased mode.
+    f0=fit_qnm_tail(t,y;tlo=85.0,thi=200.0)
+    @test isnan(f0.kappa) && abs(f0.gammaM/G-1)>0.05
+    # Physical frequencies scale with the mass.
+    fm=fit_qnm_tail(t .* 2,y;tlo=170.0,thi=400.0,tail=template,mass=2.0)
+    @test abs(fm.omegaM-w)<1e-4 && abs(fm.gammaM-G)<1e-4
+    @test fit_qnm_tail(t,y;tlo=85.0,thi=88.0) === nothing
+end

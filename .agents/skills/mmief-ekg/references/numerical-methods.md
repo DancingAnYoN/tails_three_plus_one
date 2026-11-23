@@ -88,6 +88,13 @@ correcting its ≈ T/(T−h) upward bias.
 `[tmin, min(t_end, rmax − J)]`, with lower-order models and a window-start
 scan; quote γ with its window spread, and check resolution separately.
 
+`scripts/fit_ringdown.jl <run> [--t1 90] [--t2 160]` fits one damped sinusoid
+plus κ × (that tail fit extrapolated back) by variable projection
+(`MMIEF.fit_qnm_tail`) over a 3 × 3 window scan, also with the tail subtracted
+and with no tail term; `render_ringdown.jl` draws `ringdown_J<J>.png`. Without
+a tail term the J = 30 fundamental is off by 30–120 %; with it, within ≈ 3 %.
+Window shifts between observers use `MMIEF.mmief_outgoing_delay` (4M).
+
 `results/standard/` must exist **before** analysis/visualization;
 GitHub source archives omit generated simulation data.
 

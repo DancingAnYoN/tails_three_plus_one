@@ -2,7 +2,7 @@
 # index of late-time tails. Results depend on fit windows and must be checked
 # across windows, observers and resolutions before physical interpretation.
 module Analysis
-export fit_qnm, local_power_index, local_loglog_slope, fit_tail_model
+export fit_qnm, local_power_index, local_loglog_slope, fit_tail_model, fit_qnm_tail
 """Exploratory damped-sinusoid fit by a (gamma,omega) grid search.
 Not a robust multi-overtone or Prony/QNM estimator: inspect window dependence.
 
@@ -233,6 +233,67 @@ function fit_tail_model(t::AbstractVector{<:Real}, y::AbstractVector{<:Real};
             b2 = order >= 2 ? c[4]*tref^2 : 0.0,
             rms = sqrt(sum(abs2, res)/length(res)), maxabs = maximum(abs, res),
             n = length(tw), tmin = tw[1], tmax = tw[end])
+end
+
+"""
+    fit_qnm_tail(t, y; tlo, thi, tail=nothing, mass=1.0) -> NamedTuple or nothing
+
+Single damped sinusoid plus an optional tail template on [tlo, thi]:
+
+    y ≈ e^{-Γτ}(a cos ωτ + b sin ωτ) + κ tail,    τ = t - tlo,
+
+where `tail` is a vector of template values at the samples `t` (or `nothing`
+for no tail term). For each (Γ, ω) the amplitudes (a, b, κ) follow from linear
+least squares (variable projection), and (MΓ, Mω) is found on a grid over
+[0.03, 0.25]² (89 × 89), refined twice (41 × 41 over ±2 steps; final step
+≈ 2.5e-5). Pass `t` as observer time T and `mass` as the final mass, so that
+`omegaM` = M ω and `gammaM` = M Γ; to compare with M_f ω = 0.110455 - 0.104896 i
+(scalar l = 0, exp(-iωT)).
+
+Returns (omegaM, gammaM, a, b, kappa, rel_rms, tlo, thi, n, mass), with
+kappa = NaN without a tail and rel_rms = ‖residual‖/‖y‖ on the window, or
+`nothing` with fewer than 12 samples. Exploratory: compare windows, observers
+and resolutions before identifying a QNM.
+"""
+function fit_qnm_tail(t::AbstractVector{<:Real}, y::AbstractVector{<:Real};
+                      tlo::Real, thi::Real, tail=nothing, mass::Real=1.0)
+    length(t)==length(y) || throw(DimensionMismatch("t and y must have equal length"))
+    tail === nothing || length(tail)==length(t) ||
+        throw(DimensionMismatch("tail template must have one value per sample"))
+    idx = findall(i -> tlo <= t[i] <= thi, eachindex(t))
+    length(idx) >= 12 || return nothing
+    tw = Float64.(t[idx]); yw = Float64.(y[idx]); tau = tw .- tw[1]
+    extra = tail === nothing ? Vector{Float64}[] : [Float64.(tail[idx])]
+    design(G, w) = hcat(exp.(-G .* tau) .* cos.(w .* tau),
+                        exp.(-G .* tau) .* sin.(w .* tau), extra...)
+    function residual(G, w)
+        X = design(G, w)
+        c = lstsq_small(X, yw)
+        r = copy(yw)
+        for j in eachindex(c)
+            r .-= c[j] .* view(X, :, j)
+        end
+        return sum(abs2, r), c
+    end
+    best = (Inf, 0.0, 0.0)
+    Gs = range(0.03/mass, 0.25/mass, length=89)
+    ws = range(0.03/mass, 0.25/mass, length=89)
+    for pass in 1:3
+        for G in Gs, w in ws
+            r, _ = residual(G, w)
+            r < best[1] && (best = (r, G, w))
+        end
+        pass == 3 && break
+        dG, dw = step(Gs), step(ws)
+        Gs = range(max(best[2] - 2dG, 1e-6), best[2] + 2dG, length=41)
+        ws = range(max(best[3] - 2dw, 1e-6), best[3] + 2dw, length=41)
+    end
+    isfinite(best[1]) || return nothing
+    rss, c = residual(best[2], best[3])
+    return (omegaM = mass*best[3], gammaM = mass*best[2], a = c[1], b = c[2],
+            kappa = tail === nothing ? NaN : c[3],
+            rel_rms = sqrt(rss/max(sum(abs2, yw), eps(Float64))),
+            tlo = tw[1], thi = tw[end], n = length(tw), mass = Float64(mass))
 end
 
 end # module Analysis

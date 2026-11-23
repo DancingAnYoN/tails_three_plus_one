@@ -23,6 +23,23 @@ the window start, and writes `tail_fit.csv`, `tail_fit_J<J>.csv`):
 
 ```powershell
 julia --project=. scripts/fit_tail.jl results/T1000_J30_run --tmin 250
+julia --project=viz scripts/render_tail.jl results/T1000_J30_run   # fit shown in red
+```
+
+When `tail_fit.csv` exists, `tail_loglog.png` overlays the fitted curve and its
+local exponent `gamma + B/t + 2C/t^2` as red dashed lines.
+
+Fit the fundamental l = 0 ringdown together with that tail, extrapolated back
+and scaled by a fitted `kappa`:
+`phi = exp(-Gamma tau)(a cos omega tau + b sin omega tau) + kappa tail(t)`.
+The script scans windows (default `[90, 160]` at J = 30, shifted to other
+observers by the MMIEF delay), compares with fits that subtract or ignore the
+tail, writes `ringdown_fit.csv` and `ringdown_fit_J<J>.csv`, and draws
+`ringdown_J<J>.png` (needs `viz/`):
+
+```powershell
+julia --project=. scripts/fit_ringdown.jl results/T1000_J30_run [--t1 90] [--t2 160] [--no-plot]
+julia --project=viz scripts/render_ringdown.jl results/T1000_J30_run   # redraw only
 ```
 
 This runs the constraint-solved scheme (`a` and `A` from the constraints at

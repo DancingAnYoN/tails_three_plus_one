@@ -3,7 +3,7 @@
 module Geometry
 using ..Types: Config, IA, IB, IPHI, IPI
 export schwarzschild_fields, schwarzschild_Bprime, fdot_horizon,
-       lapse_shift, misner_sharp_mass, horizon_radius
+       lapse_shift, misner_sharp_mass, horizon_radius, mmief_outgoing_delay
 """
 Vacuum Schwarzschild values for f=0, useful as an exact stationary benchmark.
 
@@ -64,6 +64,25 @@ variable: only ingoing flux feeds the hole, and ḟ ≥ 0.
 @inline function fdot_horizon(u::Matrix{Float64}, f::Float64, p::Config)
     J = 2*p.M0+f
     return 4π*(J/u[1,IA])^2*(u[1,IPHI]+u[1,IPI])^2
+end
+
+"""
+    mmief_outgoing_delay(J, J_ref, M) -> ΔT
+
+Observer-time delay of a stationary outgoing null ray from areal radius J_ref
+to J on a Schwarzschild background of mass M. There β = 2M/(J+2M), so outgoing
+rays move with dJ/dT = 1 - 2β = (J-2M)/(J+2M), and
+
+    ΔT = (J - J_ref) + 4M ln[(J - 2M)/(J_ref - 2M)].
+
+This is an ingoing Eddington–Finkelstein time delay: a difference of
+Schwarzschild tortoise radii (coefficient 2M) measures Schwarzschild time and
+is smaller by 2M ln[...]. Negative for J < J_ref.
+"""
+function mmief_outgoing_delay(J::Real, J_ref::Real, M::Real)
+    (J > 2M && J_ref > 2M) ||
+        throw(ArgumentError("Both radii must lie outside the horizon radius 2M"))
+    return (J - J_ref) + 4M*log((J - 2M)/(J_ref - 2M))
 end
 
 end # module Geometry

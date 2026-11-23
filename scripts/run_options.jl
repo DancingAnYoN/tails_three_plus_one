@@ -117,28 +117,31 @@ function run_folder_name(base::AbstractString, p::Config, J, tmax)
 end
 
 """
-    render_tail_plot(run_dir)
+    render_in_viz(script_name, run_dir)
 
-Run scripts/render_tail.jl on `run_dir` in a separate Julia process with the
+Run scripts/<script_name> on `run_dir` in a separate Julia process with the
 viz/ environment, so GLMakie is never loaded into the core environment. A
 failure (e.g. viz/ not instantiated, no OpenGL) is reported, not thrown: the
-run data are already saved.
+data are already saved.
 """
-function render_tail_plot(run_dir::AbstractString)
+function render_in_viz(script_name::AbstractString, run_dir::AbstractString)
     root = normpath(joinpath(@__DIR__, ".."))
-    script = joinpath(root, "scripts", "render_tail.jl")
+    script = joinpath(root, "scripts", script_name)
     cmd = `$(Base.julia_cmd()) --project=$(joinpath(root, "viz")) $script $run_dir`
-    println("Rendering the tail plot in the viz environment (GLMakie start-up takes a while)...")
+    println("Rendering with $script_name in the viz environment (GLMakie start-up takes a while)...")
     try
         run(cmd)
     catch
         # The child process has already printed its own error above.
-        println("Tail plot failed; the run data are saved. If viz/ is not set up yet, see\n",
+        println("Plot failed; the data are saved. If viz/ is not set up yet, see\n",
                 "README section 2, then retry with:\n",
-                "  julia --project=viz scripts/render_tail.jl ", run_dir)
+                "  julia --project=viz scripts/$script_name ", run_dir)
     end
     return nothing
 end
+
+"""Render tail_loglog.png for `run_dir` (scripts/render_tail.jl, viz environment)."""
+render_tail_plot(run_dir::AbstractString) = render_in_viz("render_tail.jl", run_dir)
 
 """
 Warn when an observer can see the outer boundary before t_max.

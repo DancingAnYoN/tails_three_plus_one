@@ -40,17 +40,18 @@ include("ConstraintSolvedEvolution.jl")  # constraint-solved solver path
 
 using .Types: Config, SimulationState
 using .Grid: radial_grid, RadialGrid
-using .Geometry: schwarzschild_fields
+using .Geometry: schwarzschild_fields, mmief_outgoing_delay
 using .InitialData: initial_data
 using .Diagnostics: diagnostics
 using .DataOutput: RunData, save_run, load_run, save_csv, save_waveforms, waveform_filename
 using .Evolution: run_evolution, vacuum_test
-using .Analysis: fit_qnm, local_power_index, local_loglog_slope, fit_tail_model
+using .Analysis: fit_qnm, local_power_index, local_loglog_slope, fit_tail_model, fit_qnm_tail
 using .ConstraintSolvedEvolution: run_constraint_solved, vacuum_constrained_rhs
 
 export Config, SimulationState, RadialGrid, radial_grid, schwarzschild_fields,
        initial_data, diagnostics, run_evolution, vacuum_test, RunData,
        save_run, load_run, save_csv, save_waveforms, waveform_filename,
        fit_qnm, local_power_index, local_loglog_slope, fit_tail_model,
+       fit_qnm_tail, mmief_outgoing_delay,
        run_constraint_solved, vacuum_constrained_rhs
 end # module MMIEF

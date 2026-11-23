@@ -18,19 +18,12 @@ include(joinpath(@__DIR__, "interpret_qnm_results.jl"))
 const SCALAR_L0_OMEGA_R = 0.110455
 const SCALAR_L0_GAMMA   = 0.104896
 
-# Stationary outgoing null delay from J_ref to J in MMIEF observer time on the
-# final Schwarzschild background of mass M. There β = 2M/(J+2M), so outgoing
-# rays move with dJ/dT = 1 - 2β = (J-2M)/(J+2M), giving
-#     ΔT = (J - J_ref) + 4M ln[(J-2M)/(J_ref-2M)]      (AGENTS.md).
-# A difference of Schwarzschild tortoise radii (coefficient 2M) measures
-# Schwarzschild time instead and would under-shift by 2M ln[...], about 2.5M
-# between J = 10 and 30. Used only to shift the proposed fit windows between
-# observers; a heuristic delay, not a QNM fit parameter.
-function mmief_outgoing_delay(J::Float64, J_ref::Float64, M::Float64)
-    (J > 2M && J_ref > 2M) ||
-        throw(ArgumentError("Observers must lie outside the final horizon radius 2M"))
-    return (J - J_ref) + 4M * log((J - 2M) / (J_ref - 2M))
-end
+# Fit windows are shifted between observers by MMIEF.mmief_outgoing_delay, the
+# stationary outgoing null delay in observer time on the final Schwarzschild
+# background, ΔT = (J - J_ref) + 4M ln[(J-2M)/(J_ref-2M)] (AGENTS.md). A
+# difference of Schwarzschild tortoise radii (coefficient 2M) would under-shift
+# by 2M ln[...], about 2.5M between J = 10 and 30. The delay is a heuristic
+# window shift, not a QNM fit parameter.
 
 # Fit five windows at each observer, print the fitted M_f ω_R and M_f γ with
 # their percentage deviation from the reference mode, write qnm_comparison.csv

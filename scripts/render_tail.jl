@@ -8,6 +8,7 @@
 using MMIEF
 using GLMakie
 using Printf
+include(joinpath(@__DIR__, "fit_tail.jl"))   # read_tail_fits, tail_model
 
 const LPI_HALFWIDTH = 25.0   # half-width of the local log–log fit window, in M0
 const PALETTE = [:dodgerblue, :darkorange, :seagreen, :purple, :firebrick]
@@ -46,6 +47,7 @@ function make_tail_plot(run_dir::AbstractString; show_window::Bool=false)
     ylate = minimum(minimum(abs, s[max(1, end - length(s) ÷ 10):end]) for s in data.signals)
     ylo = max(0.2*ylate, 1e-16*ymax)
 
+    fits = read_tail_fits(run_dir)
     println("Local power index p(T) = -d ln|phi| / d ln T (exploratory):")
     guide = nothing        # (T range, amplitude at its end) for the T⁻³ line
     any_index = false      # some p(T) value lies inside the plotted range
@@ -84,6 +86,22 @@ function make_tail_plot(run_dir::AbstractString; show_window::Bool=false)
             Ta = T[iclean]
             Tb = max(Ta/10, T[itail])
             Tb < Ta && (guide = (range(Tb, Ta, length=50), abs(y[iclean])))
+        end
+
+        # Fitted model from scripts/fit_tail.jl in red on its window: the curve,
+        # and its local exponent p_fit = γ + B/t + 2C/t² (fit in coordinate t;
+        # T = t - f differs by < 1e-4 M0 for weak pulses).
+        kf = findfirst(x -> isapprox(x, J; atol=1e-9), collect(keys(fits)))
+        if kf !== nothing
+            fp = fits[collect(keys(fits))[kf]]
+            tf = range(fp.tmin, fp.tmax, length=400)
+            flabel = @sprintf("fit, J = %g M₀, t ≥ %g M₀: γ = %.4f", J/M, fp.tmin/M, fp.gamma)
+            lines!(ax1, tf ./ M, abs.(tail_model.(Ref(fp), tf));
+                   color=:red, linestyle=:dash, linewidth=3, label=flabel)
+            lines!(ax2, tf ./ M, fp.gamma .+ fp.B ./ tf .+ 2 .* fp.C ./ tf.^2;
+                   color=:red, linestyle=:dash, linewidth=3, label=flabel)
+            @printf("  J = %g M0: fit A t^-gamma exp(B/t + C/t^2) on t in [%g, %g]: A = %.5e, gamma = %.5f, B = %.3f, C = %.2f, rms ln-residual = %.2e\n",
+                    J/M, fp.tmin, fp.tmax, fp.A, fp.gamma, fp.B, fp.C, fp.rms)
         end
 
         # Console summary over the last quarter of the boundary-free tail region.
